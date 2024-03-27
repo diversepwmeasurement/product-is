@@ -1,229 +1,171 @@
-# This workflow will update dependencies for product-is.
-name: Dependency Updater
-on:
-  workflow_dispatch:
-  schedule:
-    # Everyday at 15:00 UTC (8.30 PM SL time)
-    - cron:  '0 15 * * *'
-
 env:
-  MAVEN_OPTS: -Xmx4g -Xms1g
-  REPOSITORY: product-is
-  GIT_USERNAME: jenkins-is-staging
-  GIT_EMAIL: jenkins-is-staging@wso2.com
-  PRODUCT_REPOSITORY_FORKED: $GIT_USERNAME'/'${REPOSITORY}
-  REMOTE_PRODUCT_REPOSITORY_PUBLIC: wso2/$REPOSITORY
-  PRODUCT_REPOSITORY_PUBLIC: wso2/$REPOSITORY
   BUILD_NUMBER: ${{github.run_id}}
   DEPENDENCY_UPGRADE_BRANCH_NAME: IS_dependency_updater_github_action/$BUILD_NUMBER
-  PR: "https://github.com/wso2/product-is/pulls"
-
+  GIT_EMAIL: jenkins-is-staging@wso2.com
+  GIT_USERNAME: jenkins-is-staging
+  MAVEN_OPTS: -Xmx4g -Xms1g
+  PR: https://github.com/wso2/product-is/pulls
+  PRODUCT_REPOSITORY_FORKED: $GIT_USERNAME'/'${REPOSITORY}
+  PRODUCT_REPOSITORY_PUBLIC: wso2/$REPOSITORY
+  REMOTE_PRODUCT_REPOSITORY_PUBLIC: wso2/$REPOSITORY
+  REPOSITORY: product-is
 jobs:
   build:
-    runs-on: ubuntu-latest
-
     env:
-      JAVA_TOOL_OPTIONS: "-Djdk.util.zip.disableZip64ExtraFieldValidation=true -Djdk.nio.zipfs.allowDotZipEntry=true"
-
+      JAVA_TOOL_OPTIONS: -Djdk.util.zip.disableZip64ExtraFieldValidation=true -Djdk.nio.zipfs.allowDotZipEntry=true
+    runs-on: self-hosted
     steps:
-      - uses: actions/checkout@v2
-      - name: Set up Adopt JDK 11
-        uses: actions/setup-java@v2
-        with:
-          java-version: "11"
-          distribution: "adopt"
-      - name: Check $JAVA_HOME
-        run: |
-          echo $JAVA_HOME
-      - name: Cache local Maven repository
-        id: cache-maven-m2
-        uses: actions/cache@v2
-        env:
-          cache-name: cache-m2
-        with:
-          path: ~/.m2/repository
-          key: ${{ runner.os }}-maven-${{ env.cache-name }}-${{ hashFiles('**/pom.xml') }}
-          restore-keys: |
-            ${{ runner.os }}-maven-${{ env.cache-name }}-
-            ${{ runner.os }}-maven-
-            ${{ runner.os }}-
-      - name: Update Dependencies
-        id: builder_step
-        run: |
-          echo "::set-output name=REPO_NAME::${{ env.REPOSITORY }}"
-          echo ""
-          echo "Starting dependency upgrade"
-          echo "=========================================================="
-          echo ""
-          echo "Clean up any existing files"
-          echo "=========================================================="
-          rm -rf ${{ env.REPOSITORY }}
-          echo ""
-          echo "Cloning: https://github.com/'${{ env.PRODUCT_REPOSITORY_FORKED }}"
-          echo "=========================================================="
-          git clone 'https://github.com/'${{ env.PRODUCT_REPOSITORY_FORKED }}'.git'
-          cd ${{ env.REPOSITORY }}
-          echo ""
-          echo 'Add remote: '${{ env.REMOTE_PRODUCT_REPOSITORY_PUBLIC }} 'as https://github.com/'${{ env.PRODUCT_REPOSITORY_PUBLIC }}
-          echo "=========================================================="
-          git remote add ${{ env.REMOTE_PRODUCT_REPOSITORY_PUBLIC }} 'https://@github.com/'${{ env.PRODUCT_REPOSITORY_PUBLIC }}
-          echo ""
-          echo 'Fetching:' ${{ env.REMOTE_PRODUCT_REPOSITORY_PUBLIC }}
-          echo "=========================================================="
-          git fetch ${{ env.REMOTE_PRODUCT_REPOSITORY_PUBLIC }}
-          echo ""
-          echo 'Checking out:' ${{ env.REMOTE_PRODUCT_REPOSITORY_PUBLIC }} 'master branch'
-          echo "=========================================================="
-          git checkout -b ${{ env.DEPENDENCY_UPGRADE_BRANCH_NAME }} ${{ env.REMOTE_PRODUCT_REPOSITORY_PUBLIC }}'/master'
+    - continue-on-error: true
+      uses: actions/checkout@v2
+    - continue-on-error: true
+      name: Set up Adopt JDK 11
+      uses: actions/setup-java@v2
+      with:
+        distribution: adopt
+        java-version: '11'
+    - continue-on-error: true
+      name: Check $JAVA_HOME
+      run: 'echo $JAVA_HOME
 
-          echo ""
-          echo 'Updating dependencies'
-          echo "=========================================================="
-          mvn versions:update-properties -U -DgenerateBackupPoms=false -DallowMajorUpdates=false -Dincludes=org.wso2.carbon.identity.*,org.wso2.carbon.extension.identity.*,org.wso2.identity.*,org.wso2.carbon.consent.*,org.wso2.carbon.healthcheck.*,org.wso2.carbon.utils,org.wso2.charon,org.apache.rampart.wso2,org.apache.ws.security.wso2,org.wso2.carbon.identity.framework:* -Dexcludes=org.wso2.carbon.extension.identity.authenticator.utils
-          echo ""
-          echo 'Available updates'
-          echo "=========================================================="
-          git diff --color > dependency_updates.diff
-          cat dependency_updates.diff
+        '
+    - continue-on-error: true
+      env:
+        cache-name: cache-m2
+      id: cache-maven-m2
+      name: Cache local Maven repository
+      uses: actions/cache@v2
+      with:
+        key: ${{ runner.os }}-maven-${{ env.cache-name }}-${{ hashFiles('**/pom.xml')
+          }}
+        path: ~/.m2/repository
+        restore-keys: '${{ runner.os }}-maven-${{ env.cache-name }}-
 
-          echo ""
-          echo 'Build'
-          echo "=========================================================="
-          mvn clean install -Dmaven.test.failure.ignore=false | tee mvn-build.log
-          PR_BUILD_STATUS=$(cat mvn-build.log | grep "\[INFO\] BUILD" | grep -oE '[^ ]+$')
-          PR_TEST_RESULT=$(sed -n -e '/\[INFO\] Results:/,/\[INFO\] Tests run:/ p' mvn-build.log)
-          PR_BUILD_FINAL_RESULT=$(
-            echo "==========================================================="
-            echo "product-is BUILD $PR_BUILD_STATUS"
-            echo "=========================================================="
-            echo ""
-            echo "$PR_TEST_RESULT"
-          )
-          PR_BUILD_RESULT_LOG_TEMP=$(echo "$PR_BUILD_FINAL_RESULT" | sed 's/$/%0A/')
-          PR_BUILD_RESULT_LOG=$(echo $PR_BUILD_RESULT_LOG_TEMP)
-          echo "::warning::$PR_BUILD_RESULT_LOG"
-          PR_BUILD_SUCCESS_COUNT=$(grep -o -i "\[INFO\] BUILD SUCCESS" mvn-build.log | wc -l)
-          if [ "$PR_BUILD_SUCCESS_COUNT" != "1" ]; then
-            echo "PR BUILD not successfull. Aborting."
-            echo "::error::PR BUILD not successfull. Check artifacts for logs."
-            exit 1
-          fi
+          ${{ runner.os }}-maven-
 
-          if [ -s dependency_updates.diff ]
-          then
-            echo ""
-            echo 'Commit Changes'
-            echo "=========================================================="
-            git config --global user.email ${{ env.GIT_EMAIL }}
-            git config --global user.name ${{ env.GIT_USERNAME }}
-            git commit -a -m 'Bump dependencies from '${{ env.DEPENDENCY_UPGRADE_BRANCH_NAME }}
-            git remote rm origin
-            git remote add origin 'https://'${{ secrets.PAT }}'@github.com/'${{ env.PRODUCT_REPOSITORY_FORKED }}
+          ${{ runner.os }}-
 
-            echo ""
-            echo 'Push Changes'
-            echo "=========================================================="
-            git push -u origin ${{ env.DEPENDENCY_UPGRADE_BRANCH_NAME }}
+          '
+    - continue-on-error: true
+      id: builder_step
+      name: Update Dependencies
+      run: "echo \"::set-output name=REPO_NAME::${{ env.REPOSITORY }}\"\necho \"\"\
+        \necho \"Starting dependency upgrade\"\necho \"==========================================================\"\
+        \necho \"\"\necho \"Clean up any existing files\"\necho \"==========================================================\"\
+        \nrm -rf ${{ env.REPOSITORY }}\necho \"\"\necho \"Cloning: https://github.com/'${{\
+        \ env.PRODUCT_REPOSITORY_FORKED }}\"\necho \"==========================================================\"\
+        \ngit clone 'https://github.com/'${{ env.PRODUCT_REPOSITORY_FORKED }}'.git'\n\
+        cd ${{ env.REPOSITORY }}\necho \"\"\necho 'Add remote: '${{ env.REMOTE_PRODUCT_REPOSITORY_PUBLIC\
+        \ }} 'as https://github.com/'${{ env.PRODUCT_REPOSITORY_PUBLIC }}\necho \"\
+        ==========================================================\"\ngit remote add\
+        \ ${{ env.REMOTE_PRODUCT_REPOSITORY_PUBLIC }} 'https://@github.com/'${{ env.PRODUCT_REPOSITORY_PUBLIC\
+        \ }}\necho \"\"\necho 'Fetching:' ${{ env.REMOTE_PRODUCT_REPOSITORY_PUBLIC\
+        \ }}\necho \"==========================================================\"\n\
+        git fetch ${{ env.REMOTE_PRODUCT_REPOSITORY_PUBLIC }}\necho \"\"\necho 'Checking\
+        \ out:' ${{ env.REMOTE_PRODUCT_REPOSITORY_PUBLIC }} 'master branch'\necho\
+        \ \"==========================================================\"\ngit checkout\
+        \ -b ${{ env.DEPENDENCY_UPGRADE_BRANCH_NAME }} ${{ env.REMOTE_PRODUCT_REPOSITORY_PUBLIC\
+        \ }}'/master'\n\necho \"\"\necho 'Updating dependencies'\necho \"==========================================================\"\
+        \nmvn versions:update-properties -U -DgenerateBackupPoms=false -DallowMajorUpdates=false\
+        \ -Dincludes=org.wso2.carbon.identity.*,org.wso2.carbon.extension.identity.*,org.wso2.identity.*,org.wso2.carbon.consent.*,org.wso2.carbon.healthcheck.*,org.wso2.carbon.utils,org.wso2.charon,org.apache.rampart.wso2,org.apache.ws.security.wso2,org.wso2.carbon.identity.framework:*\
+        \ -Dexcludes=org.wso2.carbon.extension.identity.authenticator.utils\necho\
+        \ \"\"\necho 'Available updates'\necho \"==========================================================\"\
+        \ngit diff --color > dependency_updates.diff\ncat dependency_updates.diff\n\
+        \necho \"\"\necho 'Build'\necho \"==========================================================\"\
+        \nmvn clean install -Dmaven.test.failure.ignore=false | tee mvn-build.log\n\
+        PR_BUILD_STATUS=$(cat mvn-build.log | grep \"\\[INFO\\] BUILD\" | grep -oE\
+        \ '[^ ]+$')\nPR_TEST_RESULT=$(sed -n -e '/\\[INFO\\] Results:/,/\\[INFO\\\
+        ] Tests run:/ p' mvn-build.log)\nPR_BUILD_FINAL_RESULT=$(\n  echo \"===========================================================\"\
+        \n  echo \"product-is BUILD $PR_BUILD_STATUS\"\n  echo \"==========================================================\"\
+        \n  echo \"\"\n  echo \"$PR_TEST_RESULT\"\n)\nPR_BUILD_RESULT_LOG_TEMP=$(echo\
+        \ \"$PR_BUILD_FINAL_RESULT\" | sed 's/$/%0A/')\nPR_BUILD_RESULT_LOG=$(echo\
+        \ $PR_BUILD_RESULT_LOG_TEMP)\necho \"::warning::$PR_BUILD_RESULT_LOG\"\nPR_BUILD_SUCCESS_COUNT=$(grep\
+        \ -o -i \"\\[INFO\\] BUILD SUCCESS\" mvn-build.log | wc -l)\nif [ \"$PR_BUILD_SUCCESS_COUNT\"\
+        \ != \"1\" ]; then\n  echo \"PR BUILD not successfull. Aborting.\"\n  echo\
+        \ \"::error::PR BUILD not successfull. Check artifacts for logs.\"\n  exit\
+        \ 1\nfi\n\nif [ -s dependency_updates.diff ]\nthen\n  echo \"\"\n  echo 'Commit\
+        \ Changes'\n  echo \"==========================================================\"\
+        \n  git config --global user.email ${{ env.GIT_EMAIL }}\n  git config --global\
+        \ user.name ${{ env.GIT_USERNAME }}\n  git commit -a -m 'Bump dependencies\
+        \ from '${{ env.DEPENDENCY_UPGRADE_BRANCH_NAME }}\n  git remote rm origin\n\
+        \  git remote add origin 'https://'${{ secrets.PAT }}'@github.com/'${{ env.PRODUCT_REPOSITORY_FORKED\
+        \ }}\n\n  echo \"\"\n  echo 'Push Changes'\n  echo \"==========================================================\"\
+        \n  git push -u origin ${{ env.DEPENDENCY_UPGRADE_BRANCH_NAME }}\n\n  echo\
+        \ \"\"\n  echo 'Send Pull Request'\n  echo \"==========================================================\"\
+        \n\n  TITLE=\"Bump Dependencies #\"${{ env.BUILD_NUMBER }}\n  RESPONSE=$(curl\
+        \ -s -w \"%{http_code}\" -k -X \\\n  POST https://api.github.com/repos/${{\
+        \ env.PRODUCT_REPOSITORY_PUBLIC }}/pulls \\\n  -H \"Authorization: Bearer\
+        \ \"${{ secrets.PAT }}\"\" \\\n  -H \"Content-Type: application/json\" \\\n\
+        \  -d '{ \"title\": \"'\"${TITLE}\"'\",\"body\": \"Bumps dependencies for\
+        \ product-is. Link : https://github.com/wso2/product-is/actions/runs/${{github.run_id}}\"\
+        ,\"head\": \"'\"${{ env.GIT_USERNAME }}:${{ env.DEPENDENCY_UPGRADE_BRANCH_NAME\
+        \ }}\"'\",\"base\":\"master\"}')\n  RESPONSE_BODY=${RESPONSE::-3}\n  STATUS=$(printf\
+        \ \"%s\" \"$RESPONSE\" | tail -c 3)\n  if [[ $STATUS == \"201\" ]]; then\n\
+        \    echo \"PR=$(echo $RESPONSE_BODY | jq -r '.html_url')\" >> $GITHUB_ENV\n\
+        \  fi\nelse\n  echo \"\"\n  echo \"There are no dependency updates available\"\
+        \n  echo \"==========================================================\"\n\
+        \  exit 0\nfi\n"
+    - continue-on-error: true
+      if: always()
+      name: Archive dependency diff file
+      uses: actions/upload-artifact@v2
+      with:
+        name: dependency-updates-diff
+        path: '${{steps.builder_step.outputs.REPO_NAME}}/dependency_updates.diff
 
-            echo ""
-            echo 'Send Pull Request'
-            echo "=========================================================="
+          '
+    - continue-on-error: true
+      if: always()
+      name: Archive maven-build-log file
+      uses: actions/upload-artifact@v2
+      with:
+        if-no-files-found: warn
+        name: mvn-build.log
+        path: '${{steps.builder_step.outputs.REPO_NAME}}/mvn-build.log
 
-            TITLE="Bump Dependencies #"${{ env.BUILD_NUMBER }}
-            RESPONSE=$(curl -s -w "%{http_code}" -k -X \
-            POST https://api.github.com/repos/${{ env.PRODUCT_REPOSITORY_PUBLIC }}/pulls \
-            -H "Authorization: Bearer "${{ secrets.PAT }}"" \
-            -H "Content-Type: application/json" \
-            -d '{ "title": "'"${TITLE}"'","body": "Bumps dependencies for product-is. Link : https://github.com/wso2/product-is/actions/runs/${{github.run_id}}","head": "'"${{ env.GIT_USERNAME }}:${{ env.DEPENDENCY_UPGRADE_BRANCH_NAME }}"'","base":"master"}')
-            RESPONSE_BODY=${RESPONSE::-3}
-            STATUS=$(printf "%s" "$RESPONSE" | tail -c 3)
-            if [[ $STATUS == "201" ]]; then
-              echo "PR=$(echo $RESPONSE_BODY | jq -r '.html_url')" >> $GITHUB_ENV
-            fi
-          else
-            echo ""
-            echo "There are no dependency updates available"
-            echo "=========================================================="
-            exit 0
-          fi
-      - name: Archive dependency diff file
-        if: always()
-        uses: actions/upload-artifact@v2
-        with:
-          name: dependency-updates-diff
-          path: |
-            ${{steps.builder_step.outputs.REPO_NAME}}/dependency_updates.diff
-      - name: Archive maven-build-log file
-        if: always()
-        uses: actions/upload-artifact@v2
-        with:
-          name: mvn-build.log
-          path: |
-            ${{steps.builder_step.outputs.REPO_NAME}}/mvn-build.log
-          if-no-files-found: warn
-      - name: Google Chat Notification
-        run: |
-          STATUS_COLOR=$(if [[ ${{ job.status }} == "success" ]];then echo "#009944";
-          elif [[ ${{ job.status }} = "failure" ]];then echo "#ff0000";
-          elif [[ ${{ job.status }} = "cancelled" ]];then echo "#ffc300"; fi)
-
-          curl --location --request POST '${{ secrets.GOOGLE_CHAT_WEBHOOK }}' \
-          --header 'Content-Type: application/json' \
-          --data-raw '{
-              "cards": [
-                  {
-                      "header": {
-                          "title": "Dependency Updater",
-                          "subtitle": "GitHub Action #${{ env.BUILD_NUMBER }}"
-                      },
-                      "sections": [
-                          {
-                              "widgets": [
-                                  {
-                                      "textParagraph": {
-                                          "text": "Status: <br><b><font color='"${STATUS_COLOR}"'>${{ job.status }}</font></b></br>"
-                                      }
-                                  },
-                                  {
-                                      "keyValue": {
-                                          "topLabel": "Build Job:",
-                                          "content": "GitHub Action",
-                                          "contentMultiline": "false",
-                                          "bottomLabel": "",
-                                          "button": {
-                                              "textButton": {
-                                                  "text": "VIEW",
-                                                  "onClick": {
-                                                      "openLink": {
-                                                          "url": "https://github.com/wso2/product-is/actions/runs/${{github.run_id}}"
-                                                      }
-                                                  }
-                                              }
-                                          }
-                                      }
-                                  },
-                                  {
-                                      "keyValue": {
-                                          "topLabel": "Pull Request:",
-                                          "content": "Check Pull Request",
-                                          "contentMultiline": "false",
-                                          "bottomLabel": "",
-                                          "button": {
-                                              "textButton": {
-                                                  "text": "VIEW",
-                                                  "onClick": {
-                                                      "openLink": {
-                                                          "url": "'${{ env.PR }}'"
-                                                      }
-                                                  }
-                                              }
-                                          }
-                                      }
-                                  }
-                              ]
-                          }
-                      ]
-                  }
-              ]
-          }'
-        if: always()
+          '
+    - continue-on-error: true
+      if: always()
+      name: Google Chat Notification
+      run: "STATUS_COLOR=$(if [[ ${{ job.status }} == \"success\" ]];then echo \"\
+        #009944\";\nelif [[ ${{ job.status }} = \"failure\" ]];then echo \"#ff0000\"\
+        ;\nelif [[ ${{ job.status }} = \"cancelled\" ]];then echo \"#ffc300\"; fi)\n\
+        \ncurl --location --request POST '${{ secrets.GOOGLE_CHAT_WEBHOOK }}' \\\n\
+        --header 'Content-Type: application/json' \\\n--data-raw '{\n    \"cards\"\
+        : [\n        {\n            \"header\": {\n                \"title\": \"Dependency\
+        \ Updater\",\n                \"subtitle\": \"GitHub Action #${{ env.BUILD_NUMBER\
+        \ }}\"\n            },\n            \"sections\": [\n                {\n \
+        \                   \"widgets\": [\n                        {\n          \
+        \                  \"textParagraph\": {\n                                \"\
+        text\": \"Status: <br><b><font color='\"${STATUS_COLOR}\"'>${{ job.status\
+        \ }}</font></b></br>\"\n                            }\n                  \
+        \      },\n                        {\n                            \"keyValue\"\
+        : {\n                                \"topLabel\": \"Build Job:\",\n     \
+        \                           \"content\": \"GitHub Action\",\n            \
+        \                    \"contentMultiline\": \"false\",\n                  \
+        \              \"bottomLabel\": \"\",\n                                \"\
+        button\": {\n                                    \"textButton\": {\n     \
+        \                                   \"text\": \"VIEW\",\n                \
+        \                        \"onClick\": {\n                                \
+        \            \"openLink\": {\n                                           \
+        \     \"url\": \"https://github.com/wso2/product-is/actions/runs/${{github.run_id}}\"\
+        \n                                            }\n                        \
+        \                }\n                                    }\n              \
+        \                  }\n                            }\n                    \
+        \    },\n                        {\n                            \"keyValue\"\
+        : {\n                                \"topLabel\": \"Pull Request:\",\n  \
+        \                              \"content\": \"Check Pull Request\",\n    \
+        \                            \"contentMultiline\": \"false\",\n          \
+        \                      \"bottomLabel\": \"\",\n                          \
+        \      \"button\": {\n                                    \"textButton\":\
+        \ {\n                                        \"text\": \"VIEW\",\n       \
+        \                                 \"onClick\": {\n                       \
+        \                     \"openLink\": {\n                                  \
+        \              \"url\": \"'${{ env.PR }}'\"\n                            \
+        \                }\n                                        }\n          \
+        \                          }\n                                }\n        \
+        \                    }\n                        }\n                    ]\n\
+        \                }\n            ]\n        }\n    ]\n}'\n"
+name: Dependency Updater
+on:
+  repository_dispatch:
+    types: trigger-ga___dependency-updater.yml

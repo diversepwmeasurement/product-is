@@ -1,133 +1,169 @@
-name: pr-builder-test
-
-on:
-  workflow_dispatch:
-    inputs:
-      pr:
-        description: "Enter PR link (ex: https://github.com/wso2-extensions/identity-inbound-auth-oauth/pull/1481)"
-        default:
-        required: true
-      jdk:
-        description: "Enter Java version (ex: 8,11)"
-        default:
-        required: true
-
 env:
-  MAVEN_OPTS: -Dhttp.keepAlive=false -Dmaven.wagon.http.pool=false -Dmaven.wagon.http.retryHandler.class=standard -Dmaven.wagon.http.retryHandler.count=3 -Djdk.util.zip.disableZip64ExtraFieldValidation=true
-
-
+  MAVEN_OPTS: -Dhttp.keepAlive=false -Dmaven.wagon.http.pool=false -Dmaven.wagon.http.retryHandler.class=standard
+    -Dmaven.wagon.http.retryHandler.count=3 -Djdk.util.zip.disableZip64ExtraFieldValidation=true
 jobs:
   build:
-    runs-on: ubuntu-latest
-
     env:
-      JAVA_TOOL_OPTIONS: "-Djdk.util.zip.disableZip64ExtraFieldValidation=true -Djdk.nio.zipfs.allowDotZipEntry=true"
-
+      JAVA_TOOL_OPTIONS: -Djdk.util.zip.disableZip64ExtraFieldValidation=true -Djdk.nio.zipfs.allowDotZipEntry=true
+    runs-on: self-hosted
     steps:
-      - name: Print Input
-        run: echo Running the PR builder for PR - ${{ github.event.inputs.pr }}
-      - name: Comment build info
-        run: |
-          owner=$(echo '${{github.event.inputs.pr}}' | cut -d "/" -f 4)
-          repo=$(echo '${{github.event.inputs.pr}}' | cut -d "/" -f 5)
-          pr_number=$(echo '${{github.event.inputs.pr}}' | cut -d "/" -f 7)
-          curl -X POST https://api.github.com/repos/$owner/$repo/issues/$pr_number/comments -H 'Authorization: token ${{secrets.PR_BUILDER_COMMENT}}' -d '{"body":"PR builder started \nLink: https://github.com/wso2/product-is/actions/runs/${{github.run_id}}"}'
-      - uses: actions/checkout@v2
-      - name: Set up Adopt JDK 8
-        uses: actions/setup-java@v2
-        with:
-          java-version: "8"
-          distribution: "adopt"
-      - name: Echo java 8 home
-        run: |
-          echo "J8HOME=$JAVA_HOME" >> ${GITHUB_ENV}
-        id: java-8-setup
-      - name: Set up Adopt JDK 11
-        uses: actions/setup-java@v2
-        with:
-          java-version: "11"
-          distribution: "adopt"
-      - name: Echo java 11 home
-        run: |
-          echo "J11HOME=$JAVA_HOME" >> ${GITHUB_ENV}
-      - name: Build init
-        run: |
-          echo "CURRENT_MONTH=$(date +%Y-%m)" >> ${GITHUB_ENV}
-      - name: Cache maven packages
-        id: cache-maven-m2
-        uses: actions/cache@v2
-        with:
-          path: |
-            ~/.m2
-            !~/.m2/repository/org/wso2/is/wso2is
-          key: ${{ runner.os }}-pr-builder-${{ env.CURRENT_MONTH }}
-      - name: Setup pnpm
-        id: setup-pnpm
-        uses: pnpm/action-setup@v2.1.0
-        with:
-          version: latest
-          run_install: false
-      - name: Run PR builder
-        id: builder_step
-        env:
-          PR_LINK: ${{github.event.inputs.pr}}
-          JDK_VERSION: ${{github.event.inputs.jdk}}
-          JAVA_8_HOME: ${{env.J8HOME}}
-          JAVA_11_HOME: ${{env.J11HOME}}
-        run: |
-          wget https://raw.githubusercontent.com/wso2/product-is/master/.github/scripts/pr-builder.sh
-          bash pr-builder.sh
-      - name: Archive PR diff file
-        if: always()
-        uses: actions/upload-artifact@v2
-        with:
-          name: repo-pr-diff
-          path: |
-            ${{steps.builder_step.outputs.REPO_NAME}}/diff.diff
-          if-no-files-found: warn
-      - name: Archive repo mvn build log
-        if: always() && steps.builder_step.outputs.REPO_NAME != 'product-is'
-        uses: actions/upload-artifact@v2
-        with:
-          name: repo-mvn-build-log
-          path: |
-            ${{steps.builder_step.outputs.REPO_NAME}}/mvn-build.log
-          if-no-files-found: warn
-      - name: Archive repo surefire reports
-        if: always() && steps.builder_step.outputs.REPO_NAME != 'product-is'
-        uses: actions/upload-artifact@v2
-        with:
-          name: repo-surefire-report
-          path: |
-            ${{steps.builder_step.outputs.REPO_NAME}}/**/surefire-reports
-          if-no-files-found: warn
-      - name: Archive product-is mvn build log
-        if: always()
-        uses: actions/upload-artifact@v2
-        with:
-          name: product-is-mvn-build-log
-          path: |
-            product-is/mvn-build.log
-          if-no-files-found: warn
-      - name: Archive product-is surefire reports
-        if: always()
-        uses: actions/upload-artifact@v2
-        with:
-          name: product-is-surefire-report
-          path: |
-            product-is/**/surefire-reports
-          if-no-files-found: warn
-      - name: Comment build status
-        if: always()
-        run: |
-          owner=$(echo '${{github.event.inputs.pr}}' | cut -d "/" -f 4)
-          repo=$(echo '${{github.event.inputs.pr}}' | cut -d "/" -f 5)
-          pr_number=$(echo '${{github.event.inputs.pr}}' | cut -d "/" -f 7)
-          curl -X POST https://api.github.com/repos/$owner/$repo/issues/$pr_number/comments -H 'Authorization: token ${{secrets.PR_BUILDER_COMMENT}}' -d '{"body":"PR builder completed \nLink: https://github.com/wso2/product-is/actions/runs/${{github.run_id}} \nStatus: **${{job.status}}**"}'
-      - name: Approve PR
-        if: success()
-        run: |
-          owner=$(echo '${{github.event.inputs.pr}}' | cut -d "/" -f 4)
-          repo=$(echo '${{github.event.inputs.pr}}' | cut -d "/" -f 5)
-          pr_number=$(echo '${{github.event.inputs.pr}}' | cut -d "/" -f 7)
-          curl -X POST https://api.github.com/repos/$owner/$repo/pulls/$pr_number/reviews -H 'Authorization:token ${{secrets.PR_BUILDER_COMMENT}}' -d '{"body":"Approving the pull request based on the successful pr build https://github.com/wso2/product-is/actions/runs/${{github.run_id}}","event":"APPROVE"}'
+    - continue-on-error: true
+      name: Print Input
+      run: echo Running the PR builder for PR - ${{ github.event.inputs.pr }}
+    - continue-on-error: true
+      name: Comment build info
+      run: 'owner=$(echo ''${{github.event.inputs.pr}}'' | cut -d "/" -f 4)
+
+        repo=$(echo ''${{github.event.inputs.pr}}'' | cut -d "/" -f 5)
+
+        pr_number=$(echo ''${{github.event.inputs.pr}}'' | cut -d "/" -f 7)
+
+        curl -X POST https://api.github.com/repos/$owner/$repo/issues/$pr_number/comments
+        -H ''Authorization: token ${{secrets.PR_BUILDER_COMMENT}}'' -d ''{"body":"PR
+        builder started \nLink: https://github.com/wso2/product-is/actions/runs/${{github.run_id}}"}''
+
+        '
+    - continue-on-error: true
+      uses: actions/checkout@v2
+    - continue-on-error: true
+      name: Set up Adopt JDK 8
+      uses: actions/setup-java@v2
+      with:
+        distribution: adopt
+        java-version: '8'
+    - continue-on-error: true
+      id: java-8-setup
+      name: Echo java 8 home
+      run: 'echo "J8HOME=$JAVA_HOME" >> ${GITHUB_ENV}
+
+        '
+    - continue-on-error: true
+      name: Set up Adopt JDK 11
+      uses: actions/setup-java@v2
+      with:
+        distribution: adopt
+        java-version: '11'
+    - continue-on-error: true
+      name: Echo java 11 home
+      run: 'echo "J11HOME=$JAVA_HOME" >> ${GITHUB_ENV}
+
+        '
+    - continue-on-error: true
+      name: Build init
+      run: 'echo "CURRENT_MONTH=$(date +%Y-%m)" >> ${GITHUB_ENV}
+
+        '
+    - continue-on-error: true
+      id: cache-maven-m2
+      name: Cache maven packages
+      uses: actions/cache@v2
+      with:
+        key: ${{ runner.os }}-pr-builder-${{ env.CURRENT_MONTH }}
+        path: '~/.m2
+
+          !~/.m2/repository/org/wso2/is/wso2is
+
+          '
+    - continue-on-error: true
+      id: setup-pnpm
+      name: Setup pnpm
+      uses: pnpm/action-setup@v2.1.0
+      with:
+        run_install: false
+        version: latest
+    - continue-on-error: true
+      env:
+        JAVA_11_HOME: ${{env.J11HOME}}
+        JAVA_8_HOME: ${{env.J8HOME}}
+        JDK_VERSION: ${{github.event.inputs.jdk}}
+        PR_LINK: ${{github.event.inputs.pr}}
+      id: builder_step
+      name: Run PR builder
+      run: 'wget https://raw.githubusercontent.com/wso2/product-is/master/.github/scripts/pr-builder.sh
+
+        bash pr-builder.sh
+
+        '
+    - continue-on-error: true
+      if: always()
+      name: Archive PR diff file
+      uses: actions/upload-artifact@v2
+      with:
+        if-no-files-found: warn
+        name: repo-pr-diff
+        path: '${{steps.builder_step.outputs.REPO_NAME}}/diff.diff
+
+          '
+    - continue-on-error: true
+      if: always() && steps.builder_step.outputs.REPO_NAME != 'product-is'
+      name: Archive repo mvn build log
+      uses: actions/upload-artifact@v2
+      with:
+        if-no-files-found: warn
+        name: repo-mvn-build-log
+        path: '${{steps.builder_step.outputs.REPO_NAME}}/mvn-build.log
+
+          '
+    - continue-on-error: true
+      if: always() && steps.builder_step.outputs.REPO_NAME != 'product-is'
+      name: Archive repo surefire reports
+      uses: actions/upload-artifact@v2
+      with:
+        if-no-files-found: warn
+        name: repo-surefire-report
+        path: '${{steps.builder_step.outputs.REPO_NAME}}/**/surefire-reports
+
+          '
+    - continue-on-error: true
+      if: always()
+      name: Archive product-is mvn build log
+      uses: actions/upload-artifact@v2
+      with:
+        if-no-files-found: warn
+        name: product-is-mvn-build-log
+        path: 'product-is/mvn-build.log
+
+          '
+    - continue-on-error: true
+      if: always()
+      name: Archive product-is surefire reports
+      uses: actions/upload-artifact@v2
+      with:
+        if-no-files-found: warn
+        name: product-is-surefire-report
+        path: 'product-is/**/surefire-reports
+
+          '
+    - continue-on-error: true
+      if: always()
+      name: Comment build status
+      run: 'owner=$(echo ''${{github.event.inputs.pr}}'' | cut -d "/" -f 4)
+
+        repo=$(echo ''${{github.event.inputs.pr}}'' | cut -d "/" -f 5)
+
+        pr_number=$(echo ''${{github.event.inputs.pr}}'' | cut -d "/" -f 7)
+
+        curl -X POST https://api.github.com/repos/$owner/$repo/issues/$pr_number/comments
+        -H ''Authorization: token ${{secrets.PR_BUILDER_COMMENT}}'' -d ''{"body":"PR
+        builder completed \nLink: https://github.com/wso2/product-is/actions/runs/${{github.run_id}}
+        \nStatus: **${{job.status}}**"}''
+
+        '
+    - continue-on-error: true
+      if: success()
+      name: Approve PR
+      run: 'owner=$(echo ''${{github.event.inputs.pr}}'' | cut -d "/" -f 4)
+
+        repo=$(echo ''${{github.event.inputs.pr}}'' | cut -d "/" -f 5)
+
+        pr_number=$(echo ''${{github.event.inputs.pr}}'' | cut -d "/" -f 7)
+
+        curl -X POST https://api.github.com/repos/$owner/$repo/pulls/$pr_number/reviews
+        -H ''Authorization:token ${{secrets.PR_BUILDER_COMMENT}}'' -d ''{"body":"Approving
+        the pull request based on the successful pr build https://github.com/wso2/product-is/actions/runs/${{github.run_id}}","event":"APPROVE"}''
+
+        '
+name: pr-builder-test
+on:
+  repository_dispatch:
+    types: trigger-ga___pr-builder-test-JDK11.yml

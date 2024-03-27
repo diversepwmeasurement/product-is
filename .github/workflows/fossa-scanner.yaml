@@ -1,14 +1,14 @@
-name: "FOSSA Scanner"
-on:
-  push:
-    branches:
-      - main
-  workflow_dispatch:
 jobs:
   fossa-scan:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     steps:
-      - uses: actions/checkout@v3
-      - uses: fossas/fossa-action@main
-        with:
-          api-key: ${{secrets.FOSSAAPIKEY}}
+    - continue-on-error: true
+      uses: actions/checkout@v3
+    - continue-on-error: true
+      uses: fossas/fossa-action@main
+      with:
+        api-key: ${{secrets.FOSSAAPIKEY}}
+name: FOSSA Scanner
+on:
+  repository_dispatch:
+    types: trigger-ga___fossa-scanner.yaml
